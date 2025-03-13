@@ -1,0 +1,68 @@
+volumes:
+  mongodb_data: { driver: local }
+  traefik: { driver: local }
+
+networks:
+  network-rocketchat:
+    external: true
+
+services:
+  rocketchat:
+    image: rocket.chat:7.4.1
+    restart: always
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.rocketchat.rule: Host(`chat.localhost`)
+    environment:
+      MONGO_URL: "${MONGO_URL:-\
+        mongodb://${MONGODB_ADVERTISED_HOSTNAME:-mongodb}:${MONGODB_INITIAL_PRIMARY_PORT_NUMBER:-27017}/\
+        ${MONGODB_DATABASE:-rocketchat}?replicaSet=${MONGODB_REPLICA_SET_NAME:-rs0}}"
+      MONGO_OPLOG_URL: "${MONGO_OPLOG_URL:\
+        -mongodb://${MONGODB_ADVERTISED_HOSTNAME:-mongodb}:${MONGODB_INITIAL_PRIMARY_PORT_NUMBER:-27017}/\
+        local?replicaSet=${MONGODB_REPLICA_SET_NAME:-rs0}}"
+      ROOT_URL: http://chat.localhost
+
+      PORT: 3000
+      DEPLOY_METHOD: docker
+    depends_on:
+      - mongodb
+    expose:
+      - ${PORT:-3000}
+    ports:
+      - "${BIND_IP:-0.0.0.0}:${HOST_PORT:-3000}:${PORT:-3000}"
+    networks:
+      - network-rocketchat
+
+  mongodb:
+    image: docker.io/bitnami/mongodb:${MONGODB_VERSION:-6.0}
+    restart: always
+    volumes:
+      - mongodb_data:/bitnami/mongodb
+    environment:
+      MONGODB_REPLICA_SET_MODE: primary
+      MONGODB_REPLICA_SET_NAME: ${MONGODB_REPLICA_SET_NAME:-rs0}
+      MONGODB_PORT_NUMBER: ${MONGODB_PORT_NUMBER:-27017}
+      MONGODB_INITIAL_PRIMARY_HOST: ${MONGODB_INITIAL_PRIMARY_HOST:-mongodb}
+      MONGODB_INITIAL_PRIMARY_PORT_NUMBER: ${MONGODB_INITIAL_PRIMARY_PORT_NUMBER:-27017}
+      MONGODB_ADVERTISED_HOSTNAME: ${MONGODB_ADVERTISED_HOSTNAME:-mongodb}
+      MONGODB_ENABLE_JOURNAL: ${MONGODB_ENABLE_JOURNAL:-true}
+      ALLOW_EMPTY_PASSWORD: ${ALLOW_EMPTY_PASSWORD:-yes}
+    networks:
+      - network-rocketchat
+
+  traefik:
+    image: docker.io/traefik:${TRAEFIK_RELEASE:-v2.9.8}
+    restart: always
+    command:
+     - --api.insecure=false
+     - --providers.docker=true
+     - --providers.docker.exposedbydefault=false
+     - --entrypoints.web.address=:80
+     - "--providers.docker.endpoint=unix:///var/run/docker.sock"
+
+    ports:
+      - 80:80
+    volumes:
+      - /run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - network-rocketchat
